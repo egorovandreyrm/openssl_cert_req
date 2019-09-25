@@ -20,117 +20,109 @@ X509_REQ *generate_cert_req(const char *p_path) {
     EVP_PKEY *p_key = NULL;
     X509_REQ *p_x509_req = NULL;
 
-    p_file = fopen(p_path, "r");
-    if (NULL == p_file) {
+    if (NULL == (p_file = fopen(p_path, "r"))) {
         printf("failed to open the private key file\n");
-        return NULL;
+        goto CLEANUP;
     }
 
-    p_key = PEM_read_PrivateKey(p_file, NULL, NULL, NULL);
-    fclose(p_file);
-
-    if (NULL == p_key) {
+    if (NULL == (p_key = PEM_read_PrivateKey(p_file, NULL, NULL, NULL))) {
         printf("failed to read the private key file\n");
-        return NULL;
+        goto CLEANUP;
     }
 
-    p_x509_req = X509_REQ_new();
-    if (NULL == p_x509_req) {
+    if (NULL == (p_x509_req = X509_REQ_new())) {
         printf("failed to create a new X509 REQ\n");
-        EVP_PKEY_free(p_key);
-        return NULL;
+        goto CLEANUP;
     }
 
     if (0 > X509_REQ_set_pubkey(p_x509_req, p_key)) {
         printf("failed to set pub key\n");
         X509_REQ_free(p_x509_req);
-        EVP_PKEY_free(p_key);
-        return NULL;
+        p_x509_req = NULL;
+        goto CLEANUP;
     }
 
     if (0 > X509_REQ_sign(p_x509_req, p_key, EVP_sha256())) {
         printf("failed to sign the certificate\n");
         X509_REQ_free(p_x509_req);
-        EVP_PKEY_free(p_key);
-        return NULL;
+        p_x509_req = NULL;
+        goto CLEANUP;
     }
 
+    CLEANUP:
+    fclose(p_file);
     EVP_PKEY_free(p_key);
+
     return p_x509_req;
 }
 
 int randSerial(ASN1_INTEGER *ai) {
+    BIGNUM *p_bignum = NULL;
     int ret = -1;
 
-    BIGNUM *btmp = BN_new();
-    if (btmp == NULL)
-        return 0;
-
-    if (!BN_pseudo_rand(btmp, 64, 0, 0)) {
-        goto error;
+    if (NULL == (p_bignum = BN_new())) {
+        goto CLEANUP;
     }
 
-    if (ai && !BN_to_ASN1_INTEGER(btmp, ai)) {
-        goto error;
+    if (!BN_pseudo_rand(p_bignum, 64, 0, 0)) {
+        goto CLEANUP;
+    }
+
+    if (ai && !BN_to_ASN1_INTEGER(p_bignum, ai)) {
+        goto CLEANUP;
     }
 
     ret = 1;
 
-    error:
-    BN_free(btmp);
+    CLEANUP:
+    BN_free(p_bignum);
 
     return ret;
 }
 
 X509 *generate_cert(X509_REQ *pCertReq, const char *p_ca_path, const char *p_ca_key_path) {
-    FILE *p_ca_file = fopen(p_ca_path, "r");
-    if (NULL == p_ca_file) {
+    FILE *p_ca_file = NULL;
+    X509 *p_ca_cert = NULL;
+    EVP_PKEY *p_ca_pkey = NULL;
+    FILE *p_ca_key_file = NULL;
+    EVP_PKEY *p_ca_key_pkey = NULL;
+    X509 *p_generated_cert = NULL;
+    ASN1_INTEGER *p_serial_number = NULL;
+    EVP_PKEY *p_cert_req_pkey = NULL;
+
+    if (NULL == (p_ca_file = fopen(p_ca_path, "r"))) {
         printf("failed to open the ca file\n");
-        return NULL;
+        goto CLEANUP;
     }
 
-    X509 *p_ca_cert = PEM_read_X509(p_ca_file, NULL, 0, NULL);
-    fclose(p_ca_file);
-
-    if (NULL == p_ca_cert) {
+    if (NULL == (p_ca_cert = PEM_read_X509(p_ca_file, NULL, 0, NULL))) {
         printf("failed to read X509 CA certificate\n");
-        return NULL;
+        goto CLEANUP;
     }
 
-    EVP_PKEY *p_ca_pkey = X509_get_pubkey(p_ca_cert);
-    X509_free(p_ca_cert);
-
-    if (NULL == p_ca_pkey) {
+    if (NULL == (p_ca_pkey = X509_get_pubkey(p_ca_cert))) {
         printf("failed to get X509 CA pkey\n");
-        return NULL;
+        goto CLEANUP;
     }
 
-    FILE *p_ca_key_file = fopen(p_ca_key_path, "r");
-    if (NULL == p_ca_key_file) {
+    if (NULL == (p_ca_key_file = fopen(p_ca_key_path, "r"))) {
         printf("failed to open the private key file\n");
-        return NULL;
+        goto CLEANUP;
     }
 
-    EVP_PKEY *p_ca_key_pkey = PEM_read_PrivateKey(p_ca_key_file, NULL, NULL, NULL);
-    fclose(p_ca_key_file);
-
-    if (NULL == p_ca_key_pkey) {
+    if (NULL == (p_ca_key_pkey = PEM_read_PrivateKey(p_ca_key_file, NULL, NULL, NULL))) {
         printf("failed to read the private key file\n");
-        return NULL;
+        goto CLEANUP;
     }
 
-    X509 *p_generated_cert = X509_new();
-    if (NULL == p_generated_cert) {
-        printf("failed to create a new X509\n");
-        EVP_PKEY_free(p_ca_key_pkey);
-        EVP_PKEY_free(p_ca_pkey);
-        return NULL;
+    if (NULL == (p_generated_cert = X509_new())) {
+        printf("failed to allocate a new X509\n");
+        goto CLEANUP;
     }
 
-    ASN1_INTEGER *p_serial_number = ASN1_INTEGER_new();
+    p_serial_number = ASN1_INTEGER_new();
     randSerial(p_serial_number);
     X509_set_serialNumber(p_generated_cert, p_serial_number);
-    ASN1_INTEGER_free(p_serial_number);
 
     X509_set_issuer_name(p_generated_cert, X509_REQ_get_subject_name(pCertReq));
     X509_set_subject_name(p_generated_cert, X509_REQ_get_subject_name(pCertReq));
@@ -138,8 +130,7 @@ X509 *generate_cert(X509_REQ *pCertReq, const char *p_ca_path, const char *p_ca_
     X509_gmtime_adj(X509_get_notBefore(p_generated_cert), 0L);
     X509_gmtime_adj(X509_get_notAfter(p_generated_cert), 31536000L);
 
-    EVP_PKEY *p_cert_req_pkey = X509_REQ_get_pubkey(pCertReq);
-    if (NULL == p_cert_req_pkey) {
+    if (NULL == (p_cert_req_pkey = X509_REQ_get_pubkey(pCertReq))) {
         printf("failed to get certificate req pkey\n");
         X509_free(p_generated_cert);
         p_generated_cert = NULL;
@@ -170,18 +161,21 @@ X509 *generate_cert(X509_REQ *pCertReq, const char *p_ca_path, const char *p_ca_
     }
 
     CLEANUP:
-    EVP_PKEY_free(p_cert_req_pkey);
-    EVP_PKEY_free(p_ca_key_pkey);
+    fclose(p_ca_file);
+    X509_free(p_ca_cert);
     EVP_PKEY_free(p_ca_pkey);
+    fclose(p_ca_key_file);
+    EVP_PKEY_free(p_ca_key_pkey);
+    ASN1_INTEGER_free(p_serial_number);
+    EVP_PKEY_free(p_cert_req_pkey);
 
     return p_generated_cert;
 }
 
 int save_cert_req(X509_REQ *p_cert_req, const char *path) {
-    FILE *p_file = fopen(path, "w");
-    if (NULL == p_file) {
+    FILE *p_file = NULL;
+    if (NULL == (p_file = fopen(path, "w"))) {
         printf("failed to open file for saving csr\n");
-        fclose(p_file);
         return -1;
     }
 
@@ -191,10 +185,9 @@ int save_cert_req(X509_REQ *p_cert_req, const char *path) {
 }
 
 int save_cert(X509 *p_generated_cert, const char *path) {
-    FILE *p_file = fopen(path, "w");
-    if (NULL == p_file) {
+    FILE *p_file = NULL;
+    if (NULL == (p_file = fopen(path, "w"))) {
         printf("failed to open file for saving csr\n");
-        fclose(p_file);
         return -1;
     }
 
