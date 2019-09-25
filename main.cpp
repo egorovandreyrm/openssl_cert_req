@@ -3,6 +3,12 @@
 #include <openssl/bio.h>
 #include <openssl/ssl.h>
 
+// include on Windows
+
+#ifdef _WIN32
+#include <openssl/applink.c>
+#endif
+
 #define CERT_REQUEST_KEY_PATH  "root.key"
 #define GENERATED_CERT_REQUEST_SAVE_PATH  "generated_request.csr"
 
